@@ -1,0 +1,53 @@
+# macOS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# Models, caches, logs and generated training outputs
+models/
+**/models/
+hf_cache/
+ms_cache/
+om_cache/
+wandb/
+logs/
+**/logs/
+tmp/
+**/tmp/
+results/
+**/results/
+training/outputs/
+**/training/outputs/
+checkpoints/
+**/checkpoints/
+*.log
+nohup.out
+
+# Rebuildable binary retrieval indexes
+**/data/**/indexes/*.pkl
+**/data/**/indexes/*.index
+
+# Generated duplicate copied into the vendored LLaMA-Factory data folder
+core/LLaMA-Factory/data/lf_react.jsonl
+
+# Packaging artifacts
+build/
+dist/
+*.whl
