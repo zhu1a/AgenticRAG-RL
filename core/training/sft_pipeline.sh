@@ -3,7 +3,7 @@
 # 用法: bash training/sft_pipeline.sh [TRAIN_GPU] [VLLM_GPU] [RETRIEVAL_GPU]
 # 示例: bash training/sft_pipeline.sh 3 0 1
 #   训练用 GPU 3，评测时 vLLM 用 GPU 0，embedder/reranker 用 GPU 1
-set -e
+set -euo pipefail
 
 cd "$(dirname "$0")/.."
 PROJECT_DIR=$(pwd)
@@ -17,7 +17,7 @@ VLLM_GPU=${2:-0}
 RETRIEVAL_GPU=${3:-1}
 
 YAML_PATH="training/sft_zh_react.yaml"
-BASE_MODEL="/share/project/common/models/models/Qwen/Qwen3-4B"
+BASE_MODEL=${BASE_MODEL:-Qwen/Qwen3-4B}
 export BASE_MODEL
 OUTPUT_DIR="training/outputs/qwen3-4b-sft-zh-react"
 MERGED_DIR="${OUTPUT_DIR}-merged"
@@ -46,15 +46,19 @@ echo "============================================"
 # 通用函数
 # ============================================================
 cleanup_gpu() {
+    if [ "${ALLOW_GPU_PROCESS_KILL:-0}" != "1" ]; then
+        echo "  跳过自动杀进程（如确认机器独占，可设置 ALLOW_GPU_PROCESS_KILL=1）"
+        return 0
+    fi
     echo "  清理 GPU 残留..."
     # 1. nvidia-smi 可见的进程
-    pids=$(nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null | sort -u)
+    pids=$(nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null | sort -u || true)
     for pid in $pids; do kill -9 "$pid" 2>/dev/null || true; done
     # 2. vLLM EngineCore 子进程（nvidia-smi 经常看不到）
-    pids=$(ps aux | grep -i "vllm.*EngineCore\|EngineCore.*vllm" | grep -v grep | awk '{print $2}')
+    pids=$(ps aux | grep -i "vllm.*EngineCore\|EngineCore.*vllm" | grep -v grep | awk '{print $2}' || true)
     for pid in $pids; do kill -9 "$pid" 2>/dev/null || true; done
     # 3. 其他 vLLM 残留
-    pids=$(ps aux | grep -i "vllm" | grep -v grep | grep -v defunct | awk '{print $2}')
+    pids=$(ps aux | grep -i "vllm" | grep -v grep | grep -v defunct | awk '{print $2}' || true)
     for pid in $pids; do kill -9 "$pid" 2>/dev/null || true; done
     sleep 3
     nvidia-smi --query-gpu=index,memory.used --format=csv,noheader
@@ -79,7 +83,6 @@ echo ""
 echo "=== Step 0: 清理 GPU ==="
 cleanup_gpu
 check_gpu_free $TRAIN_GPU || exit 1
-rm -rf /root/.cache/huggingface/datasets/json* 2>/dev/null
 
 # ============================================================
 # Step 1: SFT 训练
@@ -198,7 +201,7 @@ for mdir in $(ls -d ${OUTPUT_DIR}*merged/ 2>/dev/null | sort); do
     fi
 
     # 4b. 评测（embedder/reranker 指定 RETRIEVAL_GPU）
-    RETRIEVAL_DEVICE="cuda:${RETRIEVAL_GPU}" python -u evaluation/run_eval.py \
+    RETRIEVAL_DEVICE="cuda:${RETRIEVAL_GPU}" "${ANYRAG_PYTHON}" -u evaluation/run_eval.py \
         --model "$SERVED_MODEL" \
         --workers $EVAL_WORKERS \
         --max-samples $EVAL_MAX_SAMPLES \
@@ -227,7 +230,7 @@ echo "=== Step 5: LLM Judge ==="
 
 RESULT_FILES=$(ls results/eval_all_*_${SERVED_MODEL}-*_financial.json 2>/dev/null)
 if [ -n "$RESULT_FILES" ]; then
-    python -u scripts/run_judge_batch.py \
+    "${ANYRAG_PYTHON}" -u scripts/run_judge_batch.py \
         $RESULT_FILES \
         --workers $JUDGE_WORKERS \
         --lang "$EVAL_LANG" \

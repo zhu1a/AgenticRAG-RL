@@ -56,7 +56,7 @@ core/
 │   │   ├── qa_pairs_zh_clean.json    # 中文评测集
 │   │   ├── sft/                      # SFT 训练数据（ReAct 格式）
 │   │   ├── sft_zh_llamafactory/      # LLaMA-Factory 格式
-│   │   ├── grpo_agentic_*.parquet    # GRPO 训练数据
+│   │   ├── grpo_agentic_*.parquet    # 生成的 GRPO 训练数据（不入 Git）
 │   │   └── traces_oracle*.jsonl      # Oracle 轨迹
 │   └── financial_all/     # 金融全语料 + 索引
 │
@@ -195,8 +195,13 @@ bash training/start_retrieval_server.sh
 
 # 3. 启动 GRPO 训练（需要 verl）
 export VERL_DIR=$(pwd)/verl
+# 可选：MODEL_PATH、TRAIN_GPUS、OUTPUT_DIR
 bash training/start_grpo.sh
 ```
+
+`grpo_agentic_*.parquet` 是可重建产物。旧版本曾按重复的答案文本关联
+gold chunks，可能导致样本证据串线；更新代码后请务必重新运行第 1 步生成，
+不要沿用旧 Parquet。
 
 ## 关键配置说明
 
@@ -209,5 +214,10 @@ bash training/start_grpo.sh
 | `MODEL_HUB` | `./models` | BGE Embedding/Reranker 模型目录 |
 | `AGENT_LLM_MODEL` | `Qwen3-32B` | Agent 默认推理模型 |
 | `PROMPT_LANG` | `zh` | Prompt 语言（zh/en） |
+| `BASE_MODEL` | `Qwen/Qwen3-4B` | SFT 基座模型名或本地路径 |
+| `RETRIEVAL_GPU` | `0` | Retrieval Server 使用的物理 GPU |
+| `RETRIEVAL_SERVER_URL` | `http://localhost:8790` | GRPO 工具调用的检索服务地址 |
+| `TRAIN_GPUS` | `0,1,2,3` | GRPO 可见 GPU 列表，卡数会自动推导 |
+| `MODEL_PATH` | SFT merged 目录 | GRPO 起始模型路径 |
 | `NEWS_CORPUS_DIR` | 空 | 金融语料路径（覆盖默认） |
 | `NEWS_INDEX_DIR` | 空 | 金融索引路径（覆盖默认） |

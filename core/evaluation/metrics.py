@@ -1,7 +1,6 @@
 """基础评测指标：EM、F1、CostTracker"""
 import re
-import string
-import time
+import unicodedata
 from collections import Counter
 
 #answer_aliases 是答案的同义写法白名单，用来让 EM/F1 对“中英文、单位、格式、缩写”更公平；它是 LLM 生成的，不是语义理解，也不能替代 LLM Judge。
@@ -9,15 +8,23 @@ from collections import Counter
 
 def _normalize(text: str) -> str:
     """标准化文本用于评测比较"""
-    #小写
-    text = text.lower()
-    # 移除标点
-    text = "".join(ch for ch in text if ch not in string.punctuation)
+    text = unicodedata.normalize("NFKC", str(text)).lower()
+    # 同时移除中英文标点。
+    text = "".join(ch for ch in text if not unicodedata.category(ch).startswith("P"))
     # 移除冠词
     text = re.sub(r"\b(a|an|the)\b", " ", text)
     # 合并空白
     text = " ".join(text.split())
     return text
+
+
+def _tokenize(text: str) -> list[str]:
+    """中英文混合评测分词。
+
+    英文/数字保留为词，中文按字计算 F1。这避免无空格的中文答案
+    被当成一个整体 token，使 F1 退化成 EM。
+    """
+    return re.findall(r"[a-z0-9]+(?:\.[0-9]+)?|[\u4e00-\u9fff]", _normalize(text))
 
 
 def exact_match(prediction: str, gold: str, aliases: list[str] | None = None) -> float:
@@ -34,8 +41,8 @@ def f1_score(prediction: str, gold: str, aliases: list[str] | None = None) -> fl
 #按token级对比
 def _f1_single(prediction: str, gold: str) -> float:
     """单个 gold 的 Token-level F1"""
-    pred_tokens = _normalize(prediction).split()
-    gold_tokens = _normalize(gold).split()
+    pred_tokens = _tokenize(prediction)
+    gold_tokens = _tokenize(gold)
 
     if not gold_tokens:
         return 1.0 if not pred_tokens else 0.0

@@ -54,13 +54,40 @@ def execute_step(state: AgentState) -> AgentState:
 
     max_calls = get_profile()["max_retrieval_calls"]
     while current < len(plan) and total_calls < max_calls:
-        step = plan[current]
+        # evidence 是跨重规划轮次累积的，而 step id 每轮会从 1 重新编号。
+        # 只把当前计划本轮已经执行的尾部 evidence 计为已完成依赖。
+        existing_evidence = state.get("evidence", [])
+        current_round_evidence = existing_evidence[-current:] if current else []
+        completed_ids = {
+            e["step_id"] for e in current_round_evidence + new_evidence
+            if "step_id" in e
+        }
 
-        # 检查依赖是否满足
-        deps = step.get("depends_on", [])
-        completed_ids = {e["step_id"] for e in state.get("evidence", []) + new_evidence}
-        if deps and not all(d in completed_ids for d in deps):
-            break
+        # 优先执行依赖已满足的步骤。LLM 偶尔会输出非拓扑顺序的
+        # plan；旧实现在此时直接 break，LangGraph 又会回到同一节点，
+        # 从而产生无限循环。
+        ready_index = None
+        for idx in range(current, len(plan)):
+            deps = plan[idx].get("depends_on", [])
+            if all(dep in completed_ids for dep in deps):
+                ready_index = idx
+                break
+
+        if ready_index is None:
+            # 循环依赖或引用了不存在的 step id。为避免卡死，执行当前
+            # 步骤并记录降级，后续 Verifier 仍会判断证据是否足够。
+            ready_index = current
+            unresolved = plan[current].get("depends_on", [])
+            new_trace.append({
+                "node": "executor",
+                "step_id": plan[current].get("id"),
+                "warning": "unresolved_dependencies",
+                "depends_on": unresolved,
+            })
+        elif ready_index != current:
+            plan[current], plan[ready_index] = plan[ready_index], plan[current]
+
+        step = plan[current]
 
         tool_names, is_hybrid = _normalize_tool(step.get("tool", "semantic_search"))
         sub_query = step.get("sub_query", state["query"])
@@ -73,7 +100,7 @@ def execute_step(state: AgentState) -> AgentState:
             tool_names = hybrid_tools
 
         # 根据已有证据上下文增强子查询
-        if current > 0 and new_evidence:
+        if current > 0 and new_evidence and "read_chunk" not in tool_names:
             prev_results = new_evidence[-1].get("results", [])
             prev_answer = prev_results[0].get("text", "")[:200] if prev_results else ""
             if prev_answer:
@@ -84,9 +111,13 @@ def execute_step(state: AgentState) -> AgentState:
             # 过滤掉不存在的工具，至少保留一个
             valid_tools = [t for t in tool_names if t in TOOL_REGISTRY]
             if not valid_tools:
-                valid_tools = ["semantic_search"]
+                fallback_tool = next(iter(TOOL_REGISTRY), None)
+                valid_tools = [fallback_tool] if fallback_tool else []
 
-            if len(valid_tools) == 1:
+            if not valid_tools:
+                results = []
+                tool_label = "no_tool_available"
+            elif len(valid_tools) == 1:
                 # 只有一个有效工具，直接调用
                 results = TOOL_REGISTRY[valid_tools[0]](sub_query)
                 tool_label = valid_tools[0]
@@ -96,9 +127,14 @@ def execute_step(state: AgentState) -> AgentState:
                 tool_label = "+".join(valid_tools)
         else:
             tool_name = tool_names[0]
-            tool_fn = TOOL_REGISTRY.get(tool_name, TOOL_REGISTRY.get("semantic_search"))
-            results = tool_fn(sub_query)
-            tool_label = tool_name
+            tool_fn = TOOL_REGISTRY.get(tool_name)
+            if tool_fn is None:
+                fallback_name = next(iter(TOOL_REGISTRY), None)
+                tool_fn = TOOL_REGISTRY.get(fallback_name) if fallback_name else None
+                tool_label = fallback_name or "no_tool_available"
+            else:
+                tool_label = tool_name
+            results = tool_fn(sub_query) if tool_fn else []
 
         total_calls += 1
         step["status"] = "done"
@@ -126,6 +162,7 @@ def execute_step(state: AgentState) -> AgentState:
         current += 1
 
     return {
+        "plan": plan,
         "current_step": current,
         "evidence": new_evidence,
         "tool_calls": new_tool_calls,

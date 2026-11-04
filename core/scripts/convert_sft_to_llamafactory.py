@@ -26,9 +26,8 @@ def convert_react(input_path: str, output_path: str):
     确保 SFT 训练文本和 GRPO rollout tokenization 100% 一致。
     """
     from transformers import AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(
-        "/share/project/common/models/models/Qwen/Qwen3-4B", trust_remote_code=True
-    )
+    model_path = os.environ.get("BASE_MODEL", "Qwen/Qwen3-4B")
+    tok = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
     count = 0
     with open(input_path) as fin, open(output_path, "w", encoding="utf-8") as fout:

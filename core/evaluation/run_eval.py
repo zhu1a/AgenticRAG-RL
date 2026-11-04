@@ -154,8 +154,9 @@ def run_full_eval(
             latency = time.time() - t0
 
             pred = state.get("final_answer", "")
-            em = exact_match(pred, gold)
-            f1 = f1_score(pred, gold)
+            aliases = qa.get("answer_aliases", [])
+            em = exact_match(pred, gold, aliases=aliases)
+            f1 = f1_score(pred, gold, aliases=aliases)
             diag = diagnose_failure(state, qa)
             cost.record(state, latency)
 

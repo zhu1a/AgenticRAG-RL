@@ -117,9 +117,14 @@ def _normalize(text: str) -> str:
     return text
 
 
+def _tokenize(text: str) -> list[str]:
+    """中英文混合 token：英文/数字按词，中文按字。"""
+    return re.findall(r"[a-z0-9]+(?:\.[0-9]+)?|[\u4e00-\u9fff]", _normalize(text))
+
+
 def _token_f1(prediction: str, gold: str) -> float:
-    pred_tokens = _normalize(prediction).split()
-    gold_tokens = _normalize(gold).split()
+    pred_tokens = _tokenize(prediction)
+    gold_tokens = _tokenize(gold)
     if not gold_tokens:
         return 1.0 if not pred_tokens else 0.0
     if not pred_tokens:
@@ -191,9 +196,13 @@ def _count_tool_calls(text: str) -> int:
 def _grounded_answer_score(pred: str, evidence: str) -> float:
     if not pred or not evidence:
         return 0.0
-    pred_tokens = set(_normalize(pred).split())
-    evidence_tokens = set(_normalize(evidence).split())
-    pred_tokens = {t for t in pred_tokens if len(t) > 1}
+    pred_tokens = set(_tokenize(pred))
+    evidence_tokens = set(_tokenize(evidence))
+    # 丢掉英文单字符噪声，但保留有意义的单个中文字。
+    pred_tokens = {
+        t for t in pred_tokens
+        if len(t) > 1 or re.fullmatch(r"[\u4e00-\u9fff]", t)
+    }
     if not pred_tokens:
         return 0.0
     overlap = pred_tokens & evidence_tokens

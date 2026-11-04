@@ -127,6 +127,8 @@ def main():
     parser.add_argument("--top-k", type=int, default=10, help="Top-K for each search tool")
     parser.add_argument("--workers", type=int, default=5, help="Parallel workers")
     parser.add_argument("--limit", type=int, default=0, help="Limit QAs (0=all)")
+    parser.add_argument("--device", default=os.environ.get("RETRIEVAL_DEVICE", "cuda:0"),
+                        help="Retrieval device (default: RETRIEVAL_DEVICE or cuda:0)")
     args = parser.parse_args()
 
     # 设置索引目录
@@ -134,7 +136,7 @@ def main():
     config.ACTIVE_INDEX_DIR = args.index_dir
 
     # 预热：加载检索模型到 GPU
-    gpu_device = "cuda:0"
+    gpu_device = args.device
     print(f"Loading retrieval models on {gpu_device}...")
     from retrieval.embedder import _get_model as get_embedder
     from retrieval.reranker import _get_model as get_reranker

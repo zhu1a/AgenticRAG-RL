@@ -44,6 +44,9 @@ nohup.out
 **/data/**/indexes/*.pkl
 **/data/**/indexes/*.index
 
+# Generated GRPO tables (rebuild with prepare_agentic_grpo_data.py)
+**/data/financial_eval/grpo_agentic_*.parquet
+
 # Generated duplicate copied into the vendored LLaMA-Factory data folder
 core/LLaMA-Factory/data/lf_react.jsonl
 

@@ -14,7 +14,7 @@ def route_query(state: AgentState) -> AgentState:
     result = agent_chat_json(profile["router"].format(query=query))
 
     query_type = "multi_hop"
-    if result and result.get("query_type") == "simple":
+    if isinstance(result, dict) and result.get("query_type") == "simple":
         query_type = "simple"
 
     return {

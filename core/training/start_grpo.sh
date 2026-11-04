@@ -1,56 +1,49 @@
 #!/bin/bash
-# Agentic GRPO v15e：Stage 3（检索质量优先）
-#
-# 三阶段策略：
-#   Stage 1 (v11e): grounding-first (Faith×0.30) → 学会 grounding
-#   Stage 2 (v14e): correctness-heavy (Corr×0.40) → 强化 correctness
-#   Stage 3 (v15e): 检索质量优先 (hop_pr×0.30) → 提升 CtxP
-#
-# Base model: v14e step30 merged（Judge_C=0.334, Faith=0.199, CtxP=0.251）
-# Reward: v9a（hop_pr×0.30 + Faith×0.25 + Corr×0.25 + grounded×0.10 + format×0.10）
-# 1 epoch（小幅微调，不破坏已有的 Judge_C 和 Faith）
-#
-# 用法: bash scripts/start_grpo_v15e.sh
-set -x
+# Agentic GRPO 训练入口。模型、GPU、输出目录均可通过环境变量覆盖。
+# 用法: VERL_DIR=/path/to/verl MODEL_PATH=/path/to/model bash training/start_grpo.sh
+set -euo pipefail
 
 PROJECT_DIR=${PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}
 VERL_DIR=${VERL_DIR:?"请设置 VERL_DIR 指向 verl 安装目录"}
+RETRIEVAL_SERVER_URL=${RETRIEVAL_SERVER_URL:-http://localhost:8790}
+TRAIN_GPUS=${TRAIN_GPUS:-0,1,2,3}
+N_GPUS=${N_GPUS:-$(printf '%s' "${TRAIN_GPUS}" | awk -F, '{print NF}')}
 
 # ── 检查 retrieval server ──
-if ! curl -s http://localhost:8790/health | grep -q "ok"; then
-    echo "ERROR: Retrieval server not running! Run scripts/start_retrieval_server.sh first."
+if ! curl -fsS "${RETRIEVAL_SERVER_URL}/health" | grep -q "ok"; then
+    echo "ERROR: Retrieval server not running at ${RETRIEVAL_SERVER_URL}."
     exit 1
 fi
 echo "Retrieval server OK"
 
-# ── GPU 清理 ──
-cleanup_gpu() {
-    ray stop --force 2>/dev/null
-    pkill -9 -f 'verl\.trainer|python3 -m verl|VLLM::|vllm' 2>/dev/null
-    pkill -9 -f 'ray::|raylet|gcs_server|ray-dashboard|dashboardagent|default_worker|monitor\.py|runtime_env' 2>/dev/null
-    sleep 3
-}
-cleanup_gpu
-
-# Stage 3 base = v14e step30 merged
-MODEL_PATH=${PROJECT_DIR}/training/outputs/qwen3-4b-grpo-v14e-step30-merged
+# 默认从 SFT 合并模型继续训练；可用 MODEL_PATH 指定其他 checkpoint。
+MODEL_PATH=${MODEL_PATH:-${PROJECT_DIR}/training/outputs/qwen3-4b-sft-zh-react-merged}
 DATA_DIR=${PROJECT_DIR}/data/financial_eval
 REWARD_FN=${PROJECT_DIR}/training/reward_agentic_rag.py
 TOOL_CONFIG=${PROJECT_DIR}/training/config/financial_tool_config.yaml
-OUTPUT_DIR=${PROJECT_DIR}/training/outputs/grpo_agentic_v15e
-LOG=${PROJECT_DIR}/logs/grpo_agentic_v15e.log
+OUTPUT_DIR=${OUTPUT_DIR:-${PROJECT_DIR}/training/outputs/grpo_agentic}
+LOG=${LOG:-${PROJECT_DIR}/logs/grpo_agentic.log}
 
-mkdir -p ${PROJECT_DIR}/logs
+mkdir -p "${PROJECT_DIR}/logs"
+for required_path in "${MODEL_PATH}" "${DATA_DIR}/grpo_agentic_train.parquet" "${DATA_DIR}/grpo_agentic_val.parquet"; do
+    if [ ! -e "${required_path}" ]; then
+        echo "ERROR: Required path does not exist: ${required_path}"
+        exit 1
+    fi
+done
+if [ -e "${OUTPUT_DIR}" ]; then
+    echo "ERROR: Output directory already exists: ${OUTPUT_DIR}"
+    echo "Set OUTPUT_DIR to a new path to avoid overwriting a previous run."
+    exit 1
+fi
 
-# 清理旧输出
-rm -rf ${OUTPUT_DIR}
-
-export PATH=${VERL_PYTHON_DIR:-$(dirname $(which python))}:$PATH
+export PATH="${VERL_PYTHON_DIR:-$(dirname "$(command -v python)")}:$PATH"
 export ATTN_BACKEND=flash_attn
-export PYTHONPATH=${PROJECT_DIR}:${PYTHONPATH}
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export PROJECT_DIR RETRIEVAL_SERVER_URL
+export PYTHONPATH="${PROJECT_DIR}:${PYTHONPATH:-}"
+export CUDA_VISIBLE_DEVICES="${TRAIN_GPUS}"
 
-cd $VERL_DIR
+cd "${VERL_DIR}"
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
@@ -95,11 +88,11 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger='["console"]' \
     trainer.project_name=cv_agenticrag \
-    trainer.experiment_name=qwen3_4b_grpo_agentic_v15e \
-    trainer.n_gpus_per_node=4 \
+    trainer.experiment_name=qwen3_4b_grpo_agentic \
+    trainer.n_gpus_per_node=${N_GPUS} \
     trainer.nnodes=1 \
     trainer.save_freq=5 \
     trainer.test_freq=3 \
     trainer.total_epochs=2 \
     trainer.default_local_dir=${OUTPUT_DIR} \
-    2>&1 | tee ${LOG}
+    2>&1 | tee "${LOG}"

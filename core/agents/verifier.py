@@ -37,11 +37,14 @@ def verify(state: AgentState) -> AgentState:
     prompt = profile["verifier"].format(query=query, evidence_text=evidence_text or "No evidence collected.")
     result = agent_chat_json(prompt)
 
-    verdict = "sufficient"
-    feedback = ""
-    if result:
-        verdict = result.get("verdict", "sufficient")
-        feedback = result.get("feedback", "")
+    # 验证器异常时不能把没有验证过的证据当作充分；继续重规划，直到预算兜底。
+    verdict = "insufficient"
+    feedback = "verifier_response_unavailable"
+    if isinstance(result, dict):
+        parsed_verdict = result.get("verdict")
+        if parsed_verdict in {"sufficient", "insufficient"}:
+            verdict = parsed_verdict
+        feedback = str(result.get("feedback", feedback))
 
     # Evidence 去重检测：LangGraph 会追加 evidence，但每次 replan 的
     # step_id 通常又从 1 开始，所以不能用 step_id 区分新旧轮次。

@@ -369,12 +369,12 @@ def main():
     parser.add_argument("--max-turns", type=int, default=7)
     parser.add_argument("--data-dir", default="data/financial_eval")
     parser.add_argument("--index-dir", default="data/financial_all/indexes")
-    parser.add_argument("--device", default=None, help="Retrieval device (default: env RETRIEVAL_DEVICE or cuda:1)")
+    parser.add_argument("--device", default=None, help="Retrieval device (default: env RETRIEVAL_DEVICE or cuda:0)")
     parser.add_argument("--workers", type=int, default=5)
     parser.add_argument("--temperature", type=float, default=0.7)
     args = parser.parse_args()
 
-    device = args.device or os.environ.get("RETRIEVAL_DEVICE", "cuda:1")
+    device = args.device or os.environ.get("RETRIEVAL_DEVICE", "cuda:0")
 
     # 加载检索索引
     print(f"[eval] Loading retrieval on {device}...")
